@@ -110,7 +110,7 @@ export function RegisterForm() {
           </div>
         </div>
 
-        {/* Confirm Password Input */}}
+        {/* Confirm Password Input */}
         <div className="space-y-1">
           <label htmlFor="confirm-password" className="block text-sm font-medium text-gray-700">
             Confirm Password
