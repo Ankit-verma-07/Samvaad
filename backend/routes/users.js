@@ -124,4 +124,144 @@ router.put("/me", auth, async (req, res) => {
   }
 });
 
+// Send connection request
+router.post("/requests/send", auth, async (req, res) => {
+  try {
+    const { receiverId } = req.body;
+    const senderId = req.user.id;
+
+    if (!receiverId) {
+      return res.status(400).json({ message: "Receiver ID is required" });
+    }
+
+    if (String(senderId) === String(receiverId)) {
+      return res.status(400).json({ message: "Cannot send request to yourself" });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if request already exists
+    const requestExists = receiver.connectionRequests.some(
+      req => String(req.fromUserId) === String(senderId)
+    );
+
+    if (requestExists) {
+      return res.status(400).json({ message: "Request already sent" });
+    }
+
+    // Check if already connected
+    const alreadyConnected = receiver.connections.some(
+      conn => String(conn) === String(senderId)
+    );
+
+    if (alreadyConnected) {
+      return res.status(400).json({ message: "Already connected" });
+    }
+
+    // Add request
+    receiver.connectionRequests.push({ fromUserId: senderId });
+    await receiver.save();
+
+    return res.status(200).json({ message: "Request sent successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to send request", error: error.message });
+  }
+});
+
+// Get received connection requests
+router.get("/requests/received", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).populate(
+      "connectionRequests.fromUserId",
+      "fullName username email avatarUrl"
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const requests = user.connectionRequests.map(req => ({
+      id: req.fromUserId._id,
+      fullName: req.fromUserId.fullName,
+      username: req.fromUserId.username,
+      email: req.fromUserId.email,
+      avatarUrl: req.fromUserId.avatarUrl,
+      requestedAt: req.createdAt
+    }));
+
+    return res.status(200).json({ requests });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to fetch requests", error: error.message });
+  }
+});
+
+// Accept connection request
+router.post("/requests/accept", auth, async (req, res) => {
+  try {
+    const { senderId } = req.body;
+    const userId = req.user.id;
+
+    if (!senderId) {
+      return res.status(400).json({ message: "Sender ID is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Remove request and add connection
+    user.connectionRequests = user.connectionRequests.filter(
+      req => String(req.fromUserId) !== String(senderId)
+    );
+
+    if (!user.connections.includes(senderId)) {
+      user.connections.push(senderId);
+    }
+
+    await user.save();
+
+    // Add user to sender's connections as well
+    const sender = await User.findById(senderId);
+    if (sender && !sender.connections.includes(userId)) {
+      sender.connections.push(userId);
+      await sender.save();
+    }
+
+    return res.status(200).json({ message: "Request accepted" });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to accept request", error: error.message });
+  }
+});
+
+// Reject connection request
+router.post("/requests/reject", auth, async (req, res) => {
+  try {
+    const { senderId } = req.body;
+    const userId = req.user.id;
+
+    if (!senderId) {
+      return res.status(400).json({ message: "Sender ID is required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.connectionRequests = user.connectionRequests.filter(
+      req => String(req.fromUserId) !== String(senderId)
+    );
+
+    await user.save();
+
+    return res.status(200).json({ message: "Request rejected" });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to reject request", error: error.message });
+  }
+});
+
 module.exports = router;

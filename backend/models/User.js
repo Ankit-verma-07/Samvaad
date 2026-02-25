@@ -8,6 +8,13 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     avatarUrl: { type: String, default: "" },
     bio: { type: String, trim: true, default: "" },
+    connectionRequests: [
+      {
+        fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now }
+      }
+    ],
+    connections: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },
   { timestamps: true }
 );

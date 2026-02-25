@@ -1,5 +1,6 @@
 import './App.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { io } from 'socket.io-client';
 import AuthPage from './AuthPage';
 import Profile from './Profile';
 
@@ -24,6 +25,7 @@ function App() {
   const [receivedRequests, setReceivedRequests] = useState([]);
   const [acceptedUsers, setAcceptedUsers] = useState([]);
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const socketRef = useRef(null);
 
   const userInitials = (() => {
     const seed = currentUser.name || currentUser.username || '';
@@ -54,7 +56,7 @@ function App() {
   // Use searched users from API
   const filteredUsers = searchedUsers;
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (input.trim()) {
       if (activeTab === 'Communities') {
         const newMessage = {
@@ -67,16 +69,23 @@ function App() {
         };
         setMessages([...messages, newMessage]);
       } else if (activeTab === 'Messages' && selectedUser) {
+        const receiverId = selectedUser.id || selectedUser;
+        const messageKey = String(receiverId);
+
+        // Add message to UI immediately
         const newMessage = {
-          id: (privateMessages[selectedUser]?.length || 0) + 1,
+          id: (privateMessages[messageKey]?.length || 0) + 1,
           sender: 'You',
           text: input,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         setPrivateMessages({
           ...privateMessages,
-          [selectedUser]: [...(privateMessages[selectedUser] || []), newMessage]
+          [messageKey]: [...(privateMessages[messageKey] || []), newMessage]
         });
+
+        // Send to backend and socket
+        await sendDirectMessage(receiverId, input);
       }
       setInput('');
     }
@@ -169,6 +178,74 @@ function App() {
     }
   };
 
+  const loadDirectMessages = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/direct/${userId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const messages = data.messages.map(msg => ({
+          id: msg._id,
+          sender: msg.sender._id === currentUser.id ? 'You' : 'Other',
+          text: msg.body,
+          time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }));
+
+        setPrivateMessages(prev => ({
+          ...prev,
+          [userId]: messages
+        }));
+
+        // Join the socket room for this direct message
+        if (socketRef.current) {
+          socketRef.current.emit('join_direct', userId);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
+  const sendDirectMessage = async (receiverId, messageText) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return false;
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/direct/send`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ receiverId, message: messageText })
+        }
+      );
+
+      if (response.ok) {
+        // Also send via socket for real-time delivery
+        if (socketRef.current) {
+          socketRef.current.emit('send_direct_message', {
+            receiverId,
+            message: messageText
+          });
+        }
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      return false;
+    }
+  };
+
   const handleJoinCommunity = (communityName) => {
     if (!joinedCommunities.includes(communityName)) {
       setJoinedCommunities([...joinedCommunities, communityName]);
@@ -177,22 +254,89 @@ function App() {
     }
   };
 
-  const handleSendRequest = (userName) => {
-    if (!sentRequests.includes(userName)) {
-      setSentRequests([...sentRequests, userName]);
+  const handleSendRequest = async (userId) => {
+    if (sentRequests.includes(userId)) {
+      return; // Already sent
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/requests/send`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ receiverId: userId })
+        }
+      );
+
+      if (response.ok) {
+        setSentRequests([...sentRequests, userId]);
+      }
+    } catch (error) {
+      console.error('Failed to send request:', error);
     }
   };
 
-  const handleAcceptRequest = (userId) => {
-    const user = receivedRequests.find(u => u.id === userId);
-    if (user) {
-      setAcceptedUsers([...acceptedUsers, user]);
-      setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+  const handleAcceptRequest = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/requests/accept`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ senderId: userId })
+        }
+      );
+
+      if (response.ok) {
+        const user = receivedRequests.find(u => u.id === userId);
+        if (user) {
+          setAcceptedUsers([...acceptedUsers, user]);
+        }
+        setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+      }
+    } catch (error) {
+      console.error('Failed to accept request:', error);
     }
   };
 
-  const handleRejectRequest = (userId) => {
-    setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+  const handleRejectRequest = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/requests/reject`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ senderId: userId })
+        }
+      );
+
+      if (response.ok) {
+        setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+      }
+    } catch (error) {
+      console.error('Failed to reject request:', error);
+    }
   };
 
   useEffect(() => {
@@ -201,6 +345,59 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  // Initialize socket connection
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const socket = io(API_BASE_URL, {
+      auth: { token },
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5
+    });
+
+    socketRef.current = socket;
+
+    socket.on('new_direct_message', (payload) => {
+      const { sender, receiver, message, timestamp } = payload;
+      const senderId = String(sender);
+      const receiverId = String(receiver);
+      const currentUserId = String(currentUser.id || '');
+
+      const messageKey = String(senderId === currentUserId ? receiverId : senderId);
+
+      setPrivateMessages(prev => ({
+        ...prev,
+        [messageKey]: [
+          ...(prev[messageKey] || []),
+          {
+            id: Date.now(),
+            sender: senderId === currentUserId ? 'You' : 'Other',
+            text: message,
+            time: new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]
+      }));
+    });
+
+    socket.on('connect', () => {
+      console.log('Connected to socket server');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected from socket server');
+    });
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [isAuthenticated, API_BASE_URL, currentUser.id]);
 
   useEffect(() => {
     const debounceTimer = setTimeout(() => {
@@ -311,6 +508,7 @@ function App() {
                       onClick={() => {
                         setSelectedUser(user);
                         setSearchQuery('');
+                        loadDirectMessages(user.id);
                       }}
                     >
                       <div className="user-avatar">{avatar}</div>
@@ -343,6 +541,7 @@ function App() {
                       className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
                       onClick={() => {
                         setSelectedUser(user);
+                        loadDirectMessages(user.id);
                       }}
                     >
                       <div className="user-avatar">{avatar}</div>
