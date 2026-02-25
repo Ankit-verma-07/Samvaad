@@ -132,9 +132,11 @@ router.post("/register/verify", async (req, res) => {
       token,
       user: {
         id: user._id,
+        fullName: user.fullName,
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        bio: user.bio,
       },
     });
   } catch (error) {
@@ -218,9 +220,11 @@ router.post("/login", async (req, res) => {
       token,
       user: {
         id: user._id,
+        fullName: user.fullName,
         username: user.username,
         email: user.email,
         avatarUrl: user.avatarUrl,
+        bio: user.bio,
       },
     });
   } catch (error) {

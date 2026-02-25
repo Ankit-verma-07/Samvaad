@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, Github, Chrome, Eye, EyeOff } from 'lucide-react';
 import './AuthPage.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://samvaad-r2nn.onrender.com';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Calculate password strength
 const calculatePasswordStrength = (password) => {

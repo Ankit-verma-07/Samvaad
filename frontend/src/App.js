@@ -1,79 +1,55 @@
 import './App.css';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthPage from './AuthPage';
+import Profile from './Profile';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => Boolean(localStorage.getItem('token'))
+  );
   const [activeTab, setActiveTab] = useState('Communities');
-  const [activeChannel, setActiveChannel] = useState('Tech Discussions');
+  const [activeChannel, setActiveChannel] = useState('Home');
   const [selectedUser, setSelectedUser] = useState(null);
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      author: 'Alex Chen',
-      time: '10:30 AM',
-      text: 'Has anyone tried the new React 19 features yet?',
-      avatar: 'AC',
-      type: 'user'
-    },
-    {
-      id: 2,
-      author: 'Sarah Johnson',
-      time: '10:32 AM',
-      text: 'Yes! The new use() hook is incredible. Makes data fetching so much cleaner.',
-      avatar: 'SJ',
-      type: 'user'
-    },
-    {
-      id: 3,
-      author: 'Saarthi AI',
-      time: '10:33 AM',
-      text: 'React 19 introduces several powerful features including the use() hook for data fetching, Server Components improvements, and automatic batching optimizations. Would you like specific implementation examples?',
-      avatar: 'SA',
-      badge: 'AI Assistant',
-      type: 'assistant'
-    },
-    {
-      id: 4,
-      author: 'Mike Thompson',
-      time: '10:35 AM',
-      text: 'The Server Components integration is a game changer for performance!',
-      avatar: 'MT',
-      type: 'user'
-    },
-    {
-      id: 5,
-      author: 'Emma Davis',
-      time: '10:38 AM',
-      text: 'I\'m particularly excited about the improvements to Suspense boundaries.',
-      avatar: 'ED',
-      type: 'user'
-    }
-  ]);
-  const [privateMessages, setPrivateMessages] = useState({
-    'Alex Chen': [
-      { id: 1, sender: 'You', text: 'Hey Alex!', time: '9:15 AM' },
-      { id: 2, sender: 'Alex Chen', text: 'Hi! How are you?', time: '9:16 AM' },
-      { id: 3, sender: 'You', text: 'Doing great! What about you?', time: '9:17 AM' }
-    ],
-    'Sarah Johnson': [
-      { id: 1, sender: 'You', text: 'Hey Sarah', time: '8:45 AM' },
-      { id: 2, sender: 'Sarah Johnson', text: 'Hi there!', time: '8:46 AM' }
-    ],
-    'Mike Thompson': [],
-    'Emma Davis': []
-  });
+  const [showProfile, setShowProfile] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [privateMessages, setPrivateMessages] = useState({});
   const [input, setInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentUser, setCurrentUser] = useState({ username: '' });
+  const [joinedCommunities, setJoinedCommunities] = useState(['General']);
+  const [sentRequests, setSentRequests] = useState([]);
+  const [searchedUsers, setSearchedUsers] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+  const userInitials = (() => {
+    const seed = currentUser.name || currentUser.username || '';
+    if (!seed) {
+      return 'U';
+    }
+
+    const parts = seed.trim().split(' ').filter(Boolean);
+    if (parts.length === 1) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+  })();
 
   const communities = [
-    { name: 'Tech Discussions', icon: '💻', unread: 3 },
-    { name: 'Design Club', icon: '🎨', unread: 0 },
-    { name: 'Startup Hub', icon: '🚀', unread: 1 },
-    { name: 'AI Research', icon: '🤖', unread: 0 },
-    { name: 'Web3 Space', icon: '👥', unread: 0 }
+    { name: 'General', icon: '💬', unread: 0 },
+    { name: 'Tech Talk', icon: '💻', unread: 3 },
+    { name: 'Random', icon: '🎲', unread: 0 },
+    { name: 'Gaming', icon: '🎮', unread: 1 },
+    { name: 'Music', icon: '🎵', unread: 0 },
   ];
 
-  const users = ['Alex Chen', 'Sarah Johnson', 'Mike Thompson', 'Emma Davis'];
+  // Filter communities based on search query
+  const filteredCommunities = communities.filter(community =>
+    community.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Use searched users from API
+  const filteredUsers = searchedUsers;
 
   const handleSendMessage = () => {
     if (input.trim()) {
@@ -103,15 +79,112 @@ function App() {
     }
   };
 
+  const loadCurrentUser = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        return;
+      }
+
+      const user = data.user || {};
+      setCurrentUser({
+        username: user.username || '',
+        name: user.fullName || '',
+        avatarUrl: user.avatarUrl || ''
+      });
+    } catch (error) {
+      // Ignore load errors for now.
+    }
+  };
+
   const handleAuthenticate = () => {
     setIsAuthenticated(true);
+    loadCurrentUser();
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
+    setShowProfile(false);
     setActiveTab('Communities');
     setSelectedUser(null);
+    localStorage.removeItem('token');
+    setCurrentUser({ username: '', avatarUrl: '' });
+    setSearchedUsers([]);
   };
+
+  const searchUsers = async (query) => {
+    if (!query || query.trim().length === 0) {
+      setSearchedUsers([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/users/search?query=${encodeURIComponent(query)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      const data = await response.json();
+
+      if (response.ok) {
+        setSearchedUsers(data.users || []);
+      }
+    } catch (error) {
+      console.error('Failed to search users:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleJoinCommunity = (communityName) => {
+    if (!joinedCommunities.includes(communityName)) {
+      setJoinedCommunities([...joinedCommunities, communityName]);
+      setActiveChannel(communityName);
+      setSearchQuery('');
+    }
+  };
+
+  const handleSendRequest = (userName) => {
+    if (!sentRequests.includes(userName)) {
+      setSentRequests([...sentRequests, userName]);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadCurrentUser();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      if (searchQuery.trim()) {
+        searchUsers(searchQuery);
+      } else {
+        setSearchedUsers([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(debounceTimer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
 
   // Show AuthPage if not authenticated
   if (!isAuthenticated) {
@@ -133,13 +206,17 @@ function App() {
             onClick={() => {
               setActiveTab('Communities');
               setSelectedUser(null);
+              setShowProfile(false);
             }}
           >
             # Communities
           </button>
           <button
             className={`tab ${activeTab === 'Messages' ? 'active' : ''}`}
-            onClick={() => setActiveTab('Messages')}
+            onClick={() => {
+              setActiveTab('Messages');
+              setShowProfile(false);
+            }}
           >
             💬 Messages
           </button>
@@ -150,64 +227,263 @@ function App() {
             <button className="create-btn">+ Create Community</button>
 
             <div className="communities-list">
-              {communities.map((community) => (
-                <div
-                  key={community.name}
-                  className={`community-item ${activeChannel === community.name ? 'active' : ''}`}
-                  onClick={() => setActiveChannel(community.name)}
-                >
-                  <span className="icon">{community.icon}</span>
-                  <span className="name">{community.name}</span>
-                  {community.unread > 0 && (
-                    <span className="badge">{community.unread}</span>
-                  )}
+              {filteredCommunities.length > 0 ? (
+                filteredCommunities.map((community) => (
+                  <div
+                    key={community.name}
+                    className={`community-item ${activeChannel === community.name ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveChannel(community.name);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <span className="icon">{community.icon}</span>
+                    <span className="name">{community.name}</span>
+                    {community.unread > 0 && (
+                      <span className="badge">{community.unread}</span>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="no-results">
+                  <p>No communities found</p>
                 </div>
-              ))}
+              )}
             </div>
           </>
         ) : (
           <>
             <div className="search-box">
-              <input type="text" placeholder="Search users..." />
+              <input 
+                type="text" 
+                placeholder="Search users..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
 
             <div className="users-list">
-              {users.map((user) => (
-                <div
-                  key={user}
-                  className={`user-item ${selectedUser === user ? 'active' : ''}`}
-                  onClick={() => setSelectedUser(user)}
-                >
-                  <div className="user-avatar">{user.charAt(0)}{user.split(' ')[1].charAt(0)}</div>
-                  <div className="user-info">
-                    <div className="user-name">{user}</div>
-                    <div className="user-preview">
-                      {privateMessages[user]?.[privateMessages[user].length - 1]?.text || 'No messages yet'}
+              {filteredUsers.length > 0 ? (
+                filteredUsers.map((user) => {
+                  const displayName = user.fullName || user.username || 'User';
+                  const nameParts = displayName.split(' ').filter(Boolean);
+                  const avatar = nameParts.length > 1 
+                    ? `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}` 
+                    : displayName.charAt(0);
+                  return (
+                  <div
+                    key={user.id || user.username}
+                    className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedUser(user);
+                      setSearchQuery('');
+                    }}
+                  >
+                    <div className="user-avatar">{avatar}</div>
+                    <div className="user-info">
+                      <div className="user-name">{displayName}</div>
+                      <div className="user-preview">
+                        {privateMessages[user.id]?.[privateMessages[user.id].length - 1]?.text || 'No messages yet'}
+                      </div>
                     </div>
                   </div>
+                );
+                })
+              ) : (
+                <div className="no-results">
+                  <p>No users found</p>
                 </div>
-              ))}
+              )}
             </div>
           </>
         )}
 
         <div className="sidebar-footer">
-          <button className="sign-out" onClick={handleLogout}>↪ Sign Out</button>
+          <button
+            className="sign-out"
+            onClick={() => setShowProfile(true)}
+          >
+            <div className="user-summary">
+              <div className="user-avatar">
+                {currentUser.avatarUrl ? (
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt="Profile"
+                    className="user-avatar-image"
+                  />
+                ) : (
+                  <span className="user-avatar-initials">{userInitials}</span>
+                )}
+              </div>
+              <div className="user-meta">
+                <div className="user-name">
+                  {currentUser.username || 'Your Username'}
+                </div>
+                <div className="user-status">
+                  <span className="user-status-dot" />
+                  Online
+                </div>
+              </div>
+            </div>
+          </button>
         </div>
       </aside>
 
       {/* Main Chat Area */}
       <main className="main-content">
-        {activeTab === 'Communities' ? (
+        {showProfile ? (
+          <Profile onLogout={handleLogout} onProfileUpdate={loadCurrentUser} />
+        ) : activeTab === 'Communities' ? (
           <>
             {/* Header */}
             <header className="chat-header">
               <div className="channel-info">
                 <span className="channel-icon">#</span>
-                <h2>{activeChannel}</h2>
+                <h2 
+                  className="channel-name-clickable"
+                  onClick={() => {
+                    setActiveChannel('Home');
+                    setSearchQuery('');
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {activeChannel}
+                </h2>
               </div>
-              <div className="member-count">👥 247 members</div>
+              <div className="header-search">
+                <input
+                  type="text"
+                  placeholder="Search users or communities..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="search-input"
+                />
+                <span className="search-icon">🔍</span>
+              </div>
             </header>
+
+            {/* Search Results Overlay */}
+            {searchQuery.trim() && (
+              <div className="search-results-overlay">
+                <div className="search-results-content">
+                  <div className="search-results-header">
+                    <h3>Search Results for "{searchQuery}"</h3>
+                    <button 
+                      className="close-search"
+                      onClick={() => setSearchQuery('')}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Communities Results */}
+                  {filteredCommunities.length > 0 && (
+                    <div className="search-section">
+                      <h4>Communities</h4>
+                      <div className="search-items">
+                        {filteredCommunities.map((community) => (
+                          <div key={community.name} className="search-result-item">
+                            <div className="search-item-info">
+                              <span className="search-item-icon">{community.icon}</span>
+                              <div>
+                                <div className="search-item-name">{community.name}</div>
+                                <div className="search-item-meta">
+                                  {joinedCommunities.includes(community.name) ? 'Joined' : 'Public Community'}
+                                </div>
+                              </div>
+                            </div>
+                            {joinedCommunities.includes(community.name) ? (
+                              <button 
+                                className="search-action-btn joined-btn"
+                                onClick={() => {
+                                  setActiveChannel(community.name);
+                                  setSearchQuery('');
+                                }}
+                              >
+                                View
+                              </button>
+                            ) : (
+                              <button 
+                                className="search-action-btn"
+                                onClick={() => handleJoinCommunity(community.name)}
+                              >
+                                Join
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Users Results */}
+                  {filteredUsers.length > 0 && (
+                    <div className="search-section">
+                      <h4>Users</h4>
+                      <div className="search-items">
+                        {filteredUsers.map((user) => (
+                          <div key={user.id} className="search-result-item">
+                            <div className="search-item-info">
+                              <div className="search-user-avatar">
+                                {user.avatarUrl ? (
+                                  <img
+                                    src={user.avatarUrl}
+                                    alt={user.username}
+                                    className="search-avatar-image"
+                                  />
+                                ) : (
+                                  <span>
+                                    {user.fullName 
+                                      ? user.fullName.split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
+                                      : user.username.slice(0, 2).toUpperCase()
+                                    }
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <div className="search-item-name">
+                                  {user.fullName || user.username}
+                                </div>
+                                <div className="search-item-meta">@{user.username}</div>
+                              </div>
+                            </div>
+                            {sentRequests.includes(user.id) ? (
+                              <button className="search-action-btn sent-btn" disabled>
+                                Request Sent
+                              </button>
+                            ) : (
+                              <button 
+                                className="search-action-btn"
+                                onClick={() => handleSendRequest(user.id)}
+                              >
+                                Send Request
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No Results */}
+                  {!isSearching && filteredCommunities.length === 0 && filteredUsers.length === 0 && (
+                    <div className="no-search-results">
+                      <div className="no-results-icon">🔍</div>
+                      <p>No results found for "{searchQuery}"</p>
+                      <span>Try searching with different keywords</span>
+                    </div>
+                  )}
+
+                  {/* Loading */}
+                  {isSearching && (
+                    <div className="search-loading">
+                      <div className="loading-spinner"></div>
+                      <p>Searching...</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Messages Area */}
             <div className="messages-container">
@@ -251,14 +527,29 @@ function App() {
             {/* Private Chat Header */}
             <header className="chat-header private-header">
               <div className="channel-info">
-                <div className="user-avatar-large">{selectedUser.charAt(0)}{selectedUser.split(' ')[1].charAt(0)}</div>
-                <h2>{selectedUser}</h2>
+                {typeof selectedUser === 'object' ? (
+                  <>
+                    <div className="user-avatar-large">
+                      {(() => {
+                        const displayName = selectedUser.fullName || selectedUser.username || 'User';
+                        const nameP = displayName.split(' ').filter(Boolean);
+                        return nameP.length > 1 ? `${nameP[0].charAt(0)}${nameP[1].charAt(0)}` : displayName.charAt(0);
+                      })()}
+                    </div>
+                    <h2>{selectedUser.fullName || selectedUser.username}</h2>
+                  </>
+                ) : (
+                  <>
+                    <div className="user-avatar-large">{selectedUser.charAt(0)}{selectedUser.split(' ')[1]?.charAt(0) || ''}</div>
+                    <h2>{selectedUser}</h2>
+                  </>
+                )}
               </div>
             </header>
 
             {/* Private Messages Area */}
             <div className="messages-container private-messages">
-              {privateMessages[selectedUser]?.map((msg) => (
+              {privateMessages[selectedUser.id || selectedUser]?.map((msg) => (
                 <div key={msg.id} className={`private-message ${msg.sender === 'You' ? 'sent' : 'received'}`}>
                   <div className="private-message-bubble">
                     {msg.text}

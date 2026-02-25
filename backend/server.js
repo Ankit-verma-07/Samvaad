@@ -7,6 +7,7 @@ const { Server } = require("socket.io");
 
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
 const chatRoutes = require("./routes/chats");
 const messageRoutes = require("./routes/messages");
 const initializeSocket = require("./sockets");
@@ -35,9 +36,11 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/messages", messageRoutes);
 
