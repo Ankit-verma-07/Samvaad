@@ -20,6 +20,9 @@ function App() {
   const [sentRequests, setSentRequests] = useState([]);
   const [searchedUsers, setSearchedUsers] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [receivedRequests, setReceivedRequests] = useState([]);
+  const [acceptedUsers, setAcceptedUsers] = useState([]);
   const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
   const userInitials = (() => {
@@ -101,6 +104,20 @@ function App() {
         name: user.fullName || '',
         avatarUrl: user.avatarUrl || ''
       });
+
+      // Load received connection requests from backend
+      try {
+        const requestsResponse = await fetch(
+          `${API_BASE_URL}/api/users/requests/received`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (requestsResponse.ok) {
+          const requestsData = await requestsResponse.json();
+          setReceivedRequests(requestsData.requests || []);
+        }
+      } catch (error) {
+        // Ignore request loading errors
+      }
     } catch (error) {
       // Ignore load errors for now.
     }
@@ -166,6 +183,18 @@ function App() {
     }
   };
 
+  const handleAcceptRequest = (userId) => {
+    const user = receivedRequests.find(u => u.id === userId);
+    if (user) {
+      setAcceptedUsers([...acceptedUsers, user]);
+      setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+    }
+  };
+
+  const handleRejectRequest = (userId) => {
+    setReceivedRequests(receivedRequests.filter(u => u.id !== userId));
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       loadCurrentUser();
@@ -207,6 +236,7 @@ function App() {
               setActiveTab('Communities');
               setSelectedUser(null);
               setShowProfile(false);
+              setSearchQuery('');
             }}
           >
             # Communities
@@ -216,6 +246,7 @@ function App() {
             onClick={() => {
               setActiveTab('Messages');
               setShowProfile(false);
+              setSearchQuery('');
             }}
           >
             💬 Messages
@@ -263,36 +294,72 @@ function App() {
             </div>
 
             <div className="users-list">
-              {filteredUsers.length > 0 ? (
-                filteredUsers.map((user) => {
-                  const displayName = user.fullName || user.username || 'User';
-                  const nameParts = displayName.split(' ').filter(Boolean);
-                  const avatar = nameParts.length > 1 
-                    ? `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}` 
-                    : displayName.charAt(0);
-                  return (
-                  <div
-                    key={user.id || user.username}
-                    className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedUser(user);
-                      setSearchQuery('');
-                    }}
-                  >
-                    <div className="user-avatar">{avatar}</div>
-                    <div className="user-info">
-                      <div className="user-name">{displayName}</div>
-                      <div className="user-preview">
-                        {privateMessages[user.id]?.[privateMessages[user.id].length - 1]?.text || 'No messages yet'}
+              {searchQuery.trim() ? (
+                // Show search results
+                filteredUsers.length > 0 ? (
+                  filteredUsers.map((user) => {
+                    const displayName = user.fullName || user.username || 'User';
+                    const nameParts = displayName.split(' ').filter(Boolean);
+                    const avatar = nameParts.length > 1 
+                      ? `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}` 
+                      : displayName.charAt(0);
+                    const isAlreadyAccepted = acceptedUsers.some(u => u.id === user.id);
+                    return (
+                    <div
+                      key={user.id || user.username}
+                      className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedUser(user);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <div className="user-avatar">{avatar}</div>
+                      <div className="user-info">
+                        <div className="user-name">{displayName}</div>
+                        <div className="user-preview">
+                          {isAlreadyAccepted ? 'Connected' : 'New user'}
+                        </div>
                       </div>
                     </div>
+                  );
+                  })
+                ) : (
+                  <div className="no-results">
+                    <p>No users found</p>
                   </div>
-                );
-                })
+                )
               ) : (
-                <div className="no-results">
-                  <p>No users found</p>
-                </div>
+                // Show accepted users
+                acceptedUsers.length > 0 ? (
+                  acceptedUsers.map((user) => {
+                    const displayName = user.fullName || user.username || 'User';
+                    const nameParts = displayName.split(' ').filter(Boolean);
+                    const avatar = nameParts.length > 1 
+                      ? `${nameParts[0].charAt(0)}${nameParts[1].charAt(0)}` 
+                      : displayName.charAt(0);
+                    return (
+                    <div
+                      key={user.id || user.username}
+                      className={`user-item ${selectedUser?.id === user.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedUser(user);
+                      }}
+                    >
+                      <div className="user-avatar">{avatar}</div>
+                      <div className="user-info">
+                        <div className="user-name">{displayName}</div>
+                        <div className="user-preview">
+                          {privateMessages[user.id]?.[privateMessages[user.id].length - 1]?.text || 'No messages yet'}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                  })
+                ) : (
+                  <div className="no-results">
+                    <p>No connections yet. Search and send requests!</p>
+                  </div>
+                )
               )}
             </div>
           </>
@@ -350,15 +417,78 @@ function App() {
                   {activeChannel}
                 </h2>
               </div>
-              <div className="header-search">
-                <input
-                  type="text"
-                  placeholder="Search users or communities..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="search-input"
-                />
-                <span className="search-icon">🔍</span>
+              <div className="header-center">
+                <div className="header-search">
+                  <input
+                    type="text"
+                    placeholder="Search users or communities..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="search-input"
+                  />
+                  <span className="search-icon">🔍</span>
+                </div>
+                <div className="notification-bell-container">
+                  <button 
+                    className="notification-bell"
+                    onClick={() => setShowNotifications(!showNotifications)}
+                  >
+                    🔔
+                    {receivedRequests.length > 0 && (
+                      <span className="notification-badge">{receivedRequests.length}</span>
+                    )}
+                  </button>
+                  
+                  {/* Notification Dropdown */}
+                  {showNotifications && (
+                    <div className="notification-dropdown">
+                      <div className="notification-header">
+                        <h3>Connection Requests</h3>
+                        <button 
+                          className="close-notification"
+                          onClick={() => setShowNotifications(false)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {receivedRequests.length > 0 ? (
+                        <div className="requests-list">
+                          {receivedRequests.map((user) => (
+                            <div key={user.id} className="request-item">
+                              <div className="request-user-info">
+                                <div className="request-avatar">
+                                  {(user.fullName || user.username || 'U').charAt(0).toUpperCase()}
+                                </div>
+                                <div className="request-details">
+                                  <div className="request-name">{user.fullName || user.username}</div>
+                                  <div className="request-username">@{user.username}</div>
+                                </div>
+                              </div>
+                              <div className="request-actions">
+                                <button 
+                                  className="accept-btn"
+                                  onClick={() => handleAcceptRequest(user.id)}
+                                >
+                                  Accept
+                                </button>
+                                <button 
+                                  className="reject-btn"
+                                  onClick={() => handleRejectRequest(user.id)}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="no-requests">
+                          <p>No pending requests</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </header>
 
